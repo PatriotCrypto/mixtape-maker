@@ -1,5 +1,5 @@
 manifestVersion: 1
-id: patriot-mixtape-maker
+id: patriot-labs-mixtape-maker
 category: media
 name: Mixtape Maker
 version: "0.1.0"
@@ -22,7 +22,7 @@ description: >-
   Your music stays on your Umbrel. Nothing leaves your network.
 
 
-  Music is read from the Umbrel storage music folder in read-only mode.
+  Music is read from the Umbrel Downloads folder in read-only mode.
 developer: PatriotCrypto
 website: https://github.com/PatriotCrypto/mixtape-maker
 repo: https://github.com/PatriotCrypto/mixtape-maker

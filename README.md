@@ -19,7 +19,7 @@ docker-compose.yml    Umbrel service definition
 app/                  The app (Node + Express, vanilla JS frontend)
 ```
 
-Music is mounted read-only from `${UMBREL_ROOT}/data/storage/music`. Tapes and the library cache live in the app's data directory.
+Music is mounted read-only from `${UMBREL_ROOT}/data/storage/downloads`. Tapes and the library cache live in the app's data directory.
 
 ## Run it locally
 
@@ -42,7 +42,7 @@ Then pin the image by digest in `docker-compose.yml` (`image: ...:0.1.0@sha256:.
 
 ## Before publishing to a community app store
 
-- Umbrel community stores require the app id to be prefixed with your store id (for example `yourstore-mixtape-maker`). The id is already `patriot-mixtape-maker`, matching your Patriot Apps store.
+- Umbrel community stores require the app id to be prefixed with your store id (for example `yourstore-mixtape-maker`). The id is already `patriot-labs-mixtape-maker`, matching your Patriot Labs store.
 - Add a 256x256 SVG icon and 3 to 5 gallery screenshots to the store.
 - Check the music folder path against your Umbrel version.
 
