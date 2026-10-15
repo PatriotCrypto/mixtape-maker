@@ -306,6 +306,42 @@ app.get('/api/tapes/:id/zip', async (req, res) => {
 // ---------- email ----------
 // SMTP details are entered once in the app and kept in the app's data folder (mode 600).
 const esc = (x) => String(x ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const MAIL_MAX_AUDIO = 15 * 1024 * 1024; // most mail providers cap a message near 25 MB after encoding
+
+// Files for a tape's songs in tape order, with sizes. Used by the email option and the size check.
+async function tapeAudio(tape) {
+  const byId = new Map(library.tracks.map((t) => [t.id, t]));
+  const out = [];
+  let bytes = 0;
+  for (const [label, ids] of [['A', tape.sideA], ['B', tape.sideB]]) {
+    let n = 0;
+    for (const id of ids) {
+      const t = byId.get(id);
+      if (!t) continue;
+      const full = path.join(MUSIC_DIR, t.rel);
+      if (!full.startsWith(MUSIC_DIR + path.sep)) continue;
+      let size = 0;
+      try {
+        size = (await fsp.stat(full)).size;
+      } catch {
+        continue;
+      }
+      n++;
+      bytes += size;
+      out.push({ path: full, size, filename: `${label}${String(n).padStart(2, '0')} - ${safeName(`${t.artist} - ${t.title}`, 'track')}${path.extname(full).toLowerCase()}` });
+    }
+  }
+  return { files: out, bytes };
+}
+
+app.get('/api/tapes/:id/audio-size', async (req, res) => {
+  const tapes = await loadTapes();
+  const tape = tapes.find((t) => t.id === req.params.id);
+  if (!tape) return res.status(404).json({ error: 'not found' });
+  const a = await tapeAudio(tape);
+  res.json({ count: a.files.length, bytes: a.bytes, max: MAIL_MAX_AUDIO });
+});
+
 const EMAIL_RE = /^[^\s@<>",;]+@[^\s@<>",;]+\.[^\s@<>",;]+$/;
 
 app.get('/api/settings/mail', async (_req, res) => {
@@ -344,6 +380,14 @@ app.post('/api/tapes/:id/email', express.json({ limit: '20mb' }), async (req, re
   if (!html || !png || png.length < 8 || png.readUInt32BE(0) !== 0x89504e47) {
     return res.status(400).json({ error: 'The cassette was not attached correctly. Try again.' });
   }
+  let audio = { files: [], bytes: 0 };
+  if (b.includeMusic) {
+    audio = await tapeAudio(tape);
+    if (!audio.files.length) return res.status(400).json({ error: 'No songs were found to attach.' });
+    if (audio.bytes > MAIL_MAX_AUDIO) {
+      return res.status(400).json({ error: `The songs are ${(audio.bytes / 1048576).toFixed(1)} MB, too big to attach (limit ${MAIL_MAX_AUDIO / 1048576} MB). Send without the songs, or use Download with music (.zip).` });
+    }
+  }
   const byId = new Map(library.tracks.map((t) => [t.id, t]));
   const sideRows = (label, ids) => {
     const rows = ids.map((id) => byId.get(id)).filter(Boolean);
@@ -362,10 +406,11 @@ app.post('/api/tapes/:id/email', express.json({ limit: '20mb' }), async (req, re
 <p style="font-size:18px">${esc(who)} made you a mixtape.</p>
 ${note ? `<p style="white-space:pre-wrap">${esc(note)}</p>` : ''}
 <img src="cid:cassette" alt="${esc(tape.title)}" style="width:100%;max-width:520px;height:auto;display:block;margin:16px 0">
-<p style="color:#555">Open the attached <b>.html</b> file in your browser to pop the cassette out of its sleeve.</p>
+<p style="color:#555"><b>To open the cassette:</b> tap the attached <b>${esc(safeName(tape.title, 'mixtape'))}.html</b> file, then tap the cassette case. If it only shows a plain preview, save the file and open it with Safari or Chrome.</p>
+${audio.files.length ? `<p style="color:#555"><b>The songs are attached</b> (${audio.files.length} files, named by side and track number).</p>` : ''}
 ${A.html}${B.html}
 </div>`;
-  const mailText = `${who} made you a mixtape: ${tape.title}\n\n${note ? note + '\n\n' : ''}Open the attached .html file in a browser to open the cassette.\n\n${A.text}\n\n${B.text}\n`;
+  const mailText = `${who} made you a mixtape: ${tape.title}\n\n${note ? note + '\n\n' : ''}To open the cassette: tap the attached .html file, then tap the cassette case. If it only shows a plain preview, save the file and open it with Safari or Chrome.\n${audio.files.length ? `The songs are attached (${audio.files.length} files, named by side and track number).\n` : ''}\n\n${A.text}\n\n${B.text}\n`;
   const fromEmail = m.fromEmail || m.user;
   try {
     const transport = nodemailer.createTransport({
@@ -386,6 +431,7 @@ ${A.html}${B.html}
       attachments: [
         { filename: 'cassette.png', content: png, cid: 'cassette', contentType: 'image/png', contentDisposition: 'inline' },
         { filename: `${safeName(tape.title, 'mixtape')}.html`, content: html, contentType: 'text/html; charset=utf-8' },
+        ...audio.files.map((f) => ({ filename: f.filename, path: f.path })),
       ],
     });
     res.json({ ok: true });

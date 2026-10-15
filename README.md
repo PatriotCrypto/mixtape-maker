@@ -8,7 +8,7 @@ Make cassette mixtapes on your Umbrel, with the 90s rules: two sides, a fixed am
 - **Library from your own files.** Scans your Umbrel music folder (MP3, M4A, AAC, FLAC, OGG, Opus, WAV) and reads durations from file metadata. Results are cached so rescans are quick.
 - **Preview** any song in the browser before you add it.
 - **Tape shelf.** Every tape is saved with its title, to/from, note and label style. Reopen and edit any time.
-- **Share the cassette.** Each tape can be sent as a single `.html` file: the recipient sees a sleeve, clicks it, the cassette slides out and the track list opens. It works offline in any browser or phone. Download it and send it any way you like, or email it straight from the app (cassette picture and track list in the message, interactive file attached).
+- **Share the cassette.** Each tape can be sent as a single `.html` file: the recipient sees a sleeve, clicks it, the cassette slides out and the track list opens. It uses no JavaScript, so it also opens inside phone mail previews, and works offline. Download it and send it any way you like, or email it straight from the app (cassette picture and track list in the message, interactive file attached, optionally with the songs attached up to 15 MB).
 - **Picture and music.** Save the cassette as a PNG, or download a ZIP with the songs in tape order (Side A and Side B folders), `playlist.m3u`, `tracklist.txt` and the cassette picture.
 
 ## Layout
@@ -56,6 +56,7 @@ Then pin the image by digest in `docker-compose.yml` (`image: ...:0.2.0@sha256:.
 | GET/POST | `/api/tapes` | List or create tapes |
 | PUT/DELETE | `/api/tapes/:id` | Update or delete a tape |
 | GET | `/api/tapes/:id/m3u` | M3U (paths relative to the music folder, for players on the same machine) |
+| GET | `/api/tapes/:id/audio-size` | Size of a tape's songs (for the email attach option) |
 | GET/PUT | `/api/settings/mail` | Read or save SMTP settings (password is never returned) |
 | POST | `/api/tapes/:id/email` | Email the cassette to 1 to 5 recipients |
 | GET | `/api/tapes/:id/zip` | Download songs, playlist, track list and cassette picture |

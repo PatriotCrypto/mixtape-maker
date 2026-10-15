@@ -108,3 +108,5 @@ dialog::backdrop { background: rgba(8, 6, 14, .72); }
 .mail-setup summary { cursor: pointer; font-size: 13px; }
 .mail-setup label { display: flex; flex-direction: column; gap: 3px; margin: 8px 0; font-size: 12px; color: var(--muted); }
 .mail-setup small { color: var(--muted); }
+.check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.check input { width: auto; }

@@ -630,28 +630,35 @@
     if (e.photo) svg = svg.replace(`href="${PHOTO_SRC}"`, `href="${e.photo}"`);
     svg = svg.replace('<svg ', '<svg class="tape" ');
     const st = STYLES[tape.style] || STYLES.red;
-    const rows = (ids) =>
-      ids
-        .map((id) => state.byId.get(id))
-        .filter(Boolean)
-        .map((t) => ({ t: t.title, a: t.artist, d: t.duration }));
-    const data = {
-      title: tape.title || 'Untitled Mix',
-      to: tape.to || '',
-      from: tape.from || '',
-      note: tape.note || '',
-      mins: tape.lengthMin || 45,
-      accent: st.accent,
-      accent2: st.accent2,
-      ink: st.ink,
-      sideA: rows(tape.sideA),
-      sideB: rows(tape.sideB),
+    const title = tape.title || 'Untitled Mix';
+    const mins = tape.lengthMin || 45;
+    const mmss = (n) => `${Math.floor(n / 60)}:${String(Math.round(n % 60)).padStart(2, '0')}`;
+    // Everything is written into the page as plain HTML. The share file uses no JavaScript at all,
+    // because phone mail apps preview attachments with scripts switched off.
+    const side = (label, ids) => {
+      const rows = ids.map((id) => state.byId.get(id)).filter(Boolean);
+      const total = rows.reduce((n, t) => n + t.duration, 0);
+      const list = rows.length
+        ? `<ol>${rows.map((t) => `<li><span>${esc(t.title)}<small>${esc(t.artist)}</small></span><em>${t.duration ? mmss(t.duration) : ''}</em></li>`).join('')}</ol>`
+        : '<div class="none">Blank side</div>';
+      return `<div><h2><span>SIDE ${label}</span><span>${mmss(total)}</span></h2>${list}</div>`;
     };
-    const json = JSON.stringify(data).split('<').join('\\u003c').split(String.fromCharCode(8232)).join('').split(String.fromCharCode(8233)).join('');
+    const greet = tape.to || tape.from
+      ? `<small>${tape.to ? 'A mixtape for' : 'A mixtape'}</small><b>${esc(tape.to || `from ${tape.from}`)}</b>`
+      : '<small>A mixtape</small>';
+    const tofrom = [tape.to && `To: ${tape.to}`, tape.from && `From: ${tape.from}`].filter(Boolean).map((t) => `<div>${esc(t)}</div>`).join('');
+    const vars = `--accent:${st.accent};--accent2:${st.accent2};--ink:${st.ink}`;
     return templateCache
       .replace('/*FONTS*/', () => e.css)
       .replace('<!--CASSETTE-->', () => svg)
-      .replace('__DATA__', () => json);
+      .replace('__VARS__', () => esc(vars))
+      .replace('__DOCTITLE__', () => esc(title + (tape.from ? ` - from ${tape.from}` : '')))
+      .replace('__GREET__', () => greet)
+      .replace(/__TITLE__/g, () => esc(title))
+      .replace('__TOFROM__', () => tofrom)
+      .replace('__LEN__', () => `C-${mins * 2}`)
+      .replace('__COLS__', () => side('A', tape.sideA) + side('B', tape.sideB))
+      .replace('__NOTE__', () => (tape.note ? `<div class="note">${esc(tape.note)}</div>` : ''));
   }
 
   const blobToB64 = async (blob) => (await blobToDataURL(blob)).split(',')[1];
@@ -694,17 +701,35 @@
 
     const to = h('input', { type: 'text', placeholder: 'friend@example.com (separate several with commas)', inputmode: 'email', autocomplete: 'off' });
     const msg = h('textarea', { rows: '3', maxlength: '1000', placeholder: 'Optional message' });
+    const music = h('input', { type: 'checkbox', id: 'inc-music' });
+    const musicLabel = h('label', { class: 'check', for: 'inc-music' }, music, h('span', { text: 'Attach the songs too' }));
+    musicLabel.classList.add('hidden');
+    if (tape.id) {
+      api(`api/tapes/${tape.id}/audio-size`)
+        .then((z) => {
+          if (!z.count) return;
+          const mb = (z.bytes / 1048576).toFixed(1);
+          if (z.bytes > z.max) {
+            musicLabel.querySelector('span').textContent = `Songs are ${mb} MB, too big to attach (limit ${Math.round(z.max / 1048576)} MB). Use "With music (.zip)" below.`;
+            music.disabled = true;
+          } else {
+            musicLabel.querySelector('span').textContent = `Attach the songs too (${z.count} files, ${mb} MB)`;
+          }
+          musicLabel.classList.remove('hidden');
+        })
+        .catch(() => {});
+    }
     const sendBtn = h('button', { class: 'primary' }, 'Send cassette');
     sendBtn.addEventListener(
       'click',
       wrap(async () => {
         if (!mail.ready) throw new Error('Set up email below first.');
         if (!tape.id) throw new Error('Save the tape first.');
-        say('Sending…');
+        say(music.checked ? 'Sending with the songs, this can take a minute…' : 'Sending…');
         const [html, png] = await Promise.all([buildShareHTML(tape), cassettePNG(tape, 1024)]);
         await api(`api/tapes/${tape.id}/email`, {
           method: 'POST',
-          body: { to: to.value, message: msg.value, html, png: await blobToB64(png) },
+          body: { to: to.value, message: msg.value, includeMusic: music.checked, html, png: await blobToB64(png) },
         });
         say(`Sent to ${to.value.trim()}.`);
       })
@@ -756,7 +781,7 @@
       h('section', {},
         h('h3', { text: 'Email it from here' }),
         h('p', { class: 'muted', text: 'They get the cassette picture and track list in the email, plus the file that opens the cassette.' }),
-        to, msg, h('div', { class: 'row' }, sendBtn), setup),
+        to, msg, musicLabel, h('div', { class: 'row' }, sendBtn), setup),
       h('section', {},
         h('h3', { text: 'Or send it yourself' }),
         h('p', { class: 'muted', text: 'Download the cassette and send it by text, Messenger, AirDrop, whatever you like. The .html file opens in any browser, even offline.' }),
