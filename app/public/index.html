@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mixtape Maker</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <h1>Mixtape<span>Maker</span></h1>
+    <nav>
+      <button data-view="build" class="tab active">Build</button>
+      <button data-view="shelf" class="tab">Shelf</button>
+    </nav>
+  </header>
+
+  <main id="view-build" class="view">
+    <section class="panel library">
+      <div class="panel-head">
+        <h2>Library</h2>
+        <button id="rescan" class="ghost" title="Rescan music folder">Rescan</button>
+      </div>
+      <input id="search" type="search" placeholder="Search artist, title, album…" autocomplete="off">
+      <div id="scan-status" class="muted"></div>
+      <ul id="track-list" class="tracks"></ul>
+    </section>
+
+    <section class="panel deck">
+      <div class="deck-top">
+      <div class="meta">
+        <label>Title <input id="t-title" maxlength="80" placeholder="Road Trip '26"></label>
+        <label>To <input id="t-to" maxlength="60" placeholder="Their name"></label>
+        <label>From <input id="t-from" maxlength="60" placeholder="Your name"></label>
+        <label>Tape
+          <select id="t-length">
+            <option value="30">C-60 (30 min / side)</option>
+            <option value="45" selected>C-90 (45 min / side)</option>
+            <option value="60">C-120 (60 min / side)</option>
+            <option value="90">C-180 (90 min / side)</option>
+          </select>
+        </label>
+        <label>Label
+          <select id="t-style">
+            <option value="red">Classic red</option>
+            <option value="green">Studio green</option>
+            <option value="blue">Chrome blue</option>
+            <option value="white">White label</option>
+          </select>
+        </label>
+        <label class="wide">Note <input id="t-note" maxlength="300" placeholder="Play loud."></label>
+      </div>
+      <div id="preview" class="preview"></div>
+      </div>
+
+      <div class="sides">
+        <div class="side" data-side="A">
+          <div class="side-head"><h3>Side A</h3><span class="time" id="time-A"></span></div>
+          <div class="tape-bar"><div class="tape-fill" id="bar-A"></div></div>
+          <ol id="list-A" class="side-list"></ol>
+        </div>
+        <div class="side" data-side="B">
+          <div class="side-head"><h3>Side B</h3><span class="time" id="time-B"></span></div>
+          <div class="tape-bar"><div class="tape-fill" id="bar-B"></div></div>
+          <ol id="list-B" class="side-list"></ol>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="save" class="primary">Save tape</button>
+        <button id="print" class="ghost">Print J-card</button>
+        <button id="m3u" class="ghost">Export M3U</button>
+        <button id="new" class="ghost">New tape</button>
+        <span id="toast" class="toast" role="status"></span>
+      </div>
+      <audio id="player" controls preload="none"></audio>
+    </section>
+  </main>
+
+  <main id="view-shelf" class="view hidden">
+    <div id="shelf-empty" class="muted center hidden">No tapes yet. Build one and hit Save.</div>
+    <div id="shelf" class="shelf"></div>
+  </main>
+
+  <div id="jcard-root" aria-hidden="true"></div>
+  <script src="app.js"></script>
+</body>
+</html>
