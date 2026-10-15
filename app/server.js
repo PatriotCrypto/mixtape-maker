@@ -5,11 +5,15 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
 const crypto = require('crypto');
+const yazl = require('yazl');
+const nodemailer = require('nodemailer');
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const MUSIC_DIR = path.resolve(process.env.MUSIC_DIR || '/music');
 const DATA_DIR = path.resolve(process.env.DATA_DIR || '/data');
 const TAPES_FILE = path.join(DATA_DIR, 'tapes.json');
+const IMG_DIR = path.join(DATA_DIR, 'images');
+const MAIL_FILE = path.join(DATA_DIR, 'mail.json');
 const CACHE_FILE = path.join(DATA_DIR, 'library-cache.json');
 const AUDIO_EXT = new Set(['.mp3', '.m4a', '.aac', '.flac', '.ogg', '.opus', '.wav']);
 const MIME = {
@@ -30,6 +34,7 @@ async function loadMM() {
 }
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
+fs.mkdirSync(IMG_DIR, { recursive: true });
 
 // ---------- helpers ----------
 const idFor = (rel) => crypto.createHash('sha1').update(rel).digest('hex').slice(0, 16);
@@ -156,7 +161,8 @@ function sanitizeTape(input, existing = {}) {
 
 // ---------- app ----------
 const app = express();
-app.use(express.json({ limit: '1mb' }));
+const smallJson = express.json({ limit: '1mb' });
+app.use((req, res, next) => (req.path.endsWith('/email') ? next() : smallJson(req, res, next)));
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
@@ -211,6 +217,7 @@ app.delete('/api/tapes/:id', async (req, res) => {
   const next = tapes.filter((t) => t.id !== req.params.id);
   if (next.length === tapes.length) return res.status(404).json({ error: 'not found' });
   await writeJson(TAPES_FILE, next);
+  fsp.unlink(imgPath(req.params.id)).catch(() => {});
   res.status(204).end();
 });
 
@@ -237,6 +244,155 @@ app.get('/api/tapes/:id/m3u', async (req, res) => {
     'Content-Disposition': `attachment; filename="${safe}.m3u"`,
   });
   res.send(lines.join('\n') + '\n');
+});
+
+const safeName = (str, fallback) =>
+  String(str || '').replace(/[\\/:*?"<>|\x00-\x1f]+/g, '').replace(/\s+/g, ' ').trim().slice(0, 80) || fallback;
+const imgPath = (id) => path.join(IMG_DIR, id.replace(/[^\w-]/g, '') + '.png');
+
+// Store the PNG of the digital cassette (rendered by the browser) so it can go in the ZIP.
+app.put('/api/tapes/:id/image', express.raw({ type: 'image/png', limit: '20mb' }), async (req, res) => {
+  const tapes = await loadTapes();
+  if (!tapes.some((t) => t.id === req.params.id)) return res.status(404).json({ error: 'not found' });
+  const buf = req.body;
+  if (!Buffer.isBuffer(buf) || buf.length < 8 || buf.readUInt32BE(0) !== 0x89504e47) {
+    return res.status(400).json({ error: 'expected a PNG' });
+  }
+  await fsp.writeFile(imgPath(req.params.id), buf);
+  res.json({ ok: true });
+});
+
+// A whole tape as a ZIP: the songs in tape order, a playlist, a track list and the cassette picture.
+app.get('/api/tapes/:id/zip', async (req, res) => {
+  const tapes = await loadTapes();
+  const tape = tapes.find((t) => t.id === req.params.id);
+  if (!tape) return res.status(404).end();
+  const byId = new Map(library.tracks.map((t) => [t.id, t]));
+  const zip = new yazl.ZipFile();
+  const root = safeName(tape.title, 'Mixtape');
+  const m3u = ['#EXTM3U', `#PLAYLIST:${tape.title}`];
+  const txt = [tape.title, `C-${tape.lengthMin * 2}`];
+  if (tape.to) txt.push(`To: ${tape.to}`);
+  if (tape.from) txt.push(`From: ${tape.from}`);
+  if (tape.note) txt.push('', tape.note);
+  const fmt = (n) => `${Math.floor(n / 60)}:${String(Math.round(n % 60)).padStart(2, '0')}`;
+  for (const [label, ids] of [['A', tape.sideA], ['B', tape.sideB]]) {
+    const tracks = ids.map((id) => byId.get(id)).filter(Boolean);
+    txt.push('', `SIDE ${label}  (${fmt(tracks.reduce((s, t) => s + t.duration, 0))})`);
+    m3u.push(`# Side ${label}`);
+    tracks.forEach((t, i) => {
+      const full = path.join(MUSIC_DIR, t.rel);
+      if (!full.startsWith(MUSIC_DIR + path.sep)) return;
+      const name = `${String(i + 1).padStart(2, '0')} - ${safeName(`${t.artist} - ${t.title}`, 'track')}${path.extname(full).toLowerCase()}`;
+      const inZip = `${root}/Side ${label}/${name}`;
+      zip.addFile(full, inZip, { compress: false });
+      m3u.push(`#EXTINF:${t.duration},${t.artist} - ${t.title}`, `Side ${label}/${name}`);
+      txt.push(`${String(i + 1).padStart(2, '0')}. ${t.artist} - ${t.title}  [${fmt(t.duration)}]`);
+    });
+  }
+  zip.addBuffer(Buffer.from(m3u.join('\n') + '\n'), `${root}/playlist.m3u`);
+  zip.addBuffer(Buffer.from(txt.join('\n') + '\n'), `${root}/tracklist.txt`);
+  try {
+    zip.addBuffer(await fsp.readFile(imgPath(tape.id)), `${root}/cassette.png`);
+  } catch {}
+  res.set({
+    'Content-Type': 'application/zip',
+    'Content-Disposition': `attachment; filename="${root}.zip"`,
+  });
+  zip.outputStream.pipe(res);
+  zip.end();
+});
+
+// ---------- email ----------
+// SMTP details are entered once in the app and kept in the app's data folder (mode 600).
+const esc = (x) => String(x ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const EMAIL_RE = /^[^\s@<>",;]+@[^\s@<>",;]+\.[^\s@<>",;]+$/;
+
+app.get('/api/settings/mail', async (_req, res) => {
+  const m = await readJson(MAIL_FILE, {});
+  res.json({ host: m.host || '', port: m.port || 587, user: m.user || '', fromName: m.fromName || '', fromEmail: m.fromEmail || '', hasPass: !!m.pass, ready: !!(m.host && m.user && m.pass) });
+});
+
+app.put('/api/settings/mail', async (req, res) => {
+  const old = await readJson(MAIL_FILE, {});
+  const b = req.body || {};
+  const next = {
+    host: String(b.host || '').trim().slice(0, 200),
+    port: Math.min(65535, Math.max(1, parseInt(b.port, 10) || 587)),
+    user: String(b.user || '').trim().slice(0, 200),
+    pass: b.pass ? String(b.pass).slice(0, 300) : old.pass || '',
+    fromName: String(b.fromName || '').trim().slice(0, 80),
+    fromEmail: String(b.fromEmail || '').trim().slice(0, 200),
+  };
+  await fsp.writeFile(MAIL_FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
+  res.json({ ok: true, ready: !!(next.host && next.user && next.pass) });
+});
+
+app.post('/api/tapes/:id/email', express.json({ limit: '20mb' }), async (req, res) => {
+  const tapes = await loadTapes();
+  const tape = tapes.find((t) => t.id === req.params.id);
+  if (!tape) return res.status(404).json({ error: 'Tape not found. Save it first.' });
+  const m = await readJson(MAIL_FILE, {});
+  if (!(m.host && m.user && m.pass)) return res.status(400).json({ error: 'Email is not set up yet.' });
+  const b = req.body || {};
+  const to = String(b.to || '').split(/[,;\s]+/).filter(Boolean);
+  if (!to.length || to.length > 5 || !to.every((x) => EMAIL_RE.test(x))) {
+    return res.status(400).json({ error: 'Enter 1 to 5 valid email addresses.' });
+  }
+  const html = typeof b.html === 'string' ? b.html : '';
+  const png = typeof b.png === 'string' ? Buffer.from(b.png, 'base64') : null;
+  if (!html || !png || png.length < 8 || png.readUInt32BE(0) !== 0x89504e47) {
+    return res.status(400).json({ error: 'The cassette was not attached correctly. Try again.' });
+  }
+  const byId = new Map(library.tracks.map((t) => [t.id, t]));
+  const sideRows = (label, ids) => {
+    const rows = ids.map((id) => byId.get(id)).filter(Boolean);
+    const secs = rows.reduce((n, t) => n + t.duration, 0);
+    const f = (n) => `${Math.floor(n / 60)}:${String(Math.round(n % 60)).padStart(2, '0')}`;
+    return {
+      text: [`SIDE ${label} (${f(secs)})`, ...rows.map((t, i) => `${i + 1}. ${t.artist} - ${t.title}`)].join('\n'),
+      html: `<p style="margin:14px 0 4px;font-weight:700;letter-spacing:1px">SIDE ${label} <span style="font-weight:400;color:#777">${f(secs)}</span></p><ol style="margin:0;padding-left:22px;line-height:1.6">${rows.map((t) => `<li>${esc(t.artist)} &ndash; ${esc(t.title)}</li>`).join('')}</ol>`,
+    };
+  };
+  const A = sideRows('A', tape.sideA);
+  const B = sideRows('B', tape.sideB);
+  const note = String(b.message || '').slice(0, 1000);
+  const who = tape.from || m.fromName || 'Someone';
+  const mailHtml = `<div style="font-family:Helvetica,Arial,sans-serif;max-width:560px;margin:auto;color:#222">
+<p style="font-size:18px">${esc(who)} made you a mixtape.</p>
+${note ? `<p style="white-space:pre-wrap">${esc(note)}</p>` : ''}
+<img src="cid:cassette" alt="${esc(tape.title)}" style="width:100%;max-width:520px;height:auto;display:block;margin:16px 0">
+<p style="color:#555">Open the attached <b>.html</b> file in your browser to pop the cassette out of its sleeve.</p>
+${A.html}${B.html}
+</div>`;
+  const mailText = `${who} made you a mixtape: ${tape.title}\n\n${note ? note + '\n\n' : ''}Open the attached .html file in a browser to open the cassette.\n\n${A.text}\n\n${B.text}\n`;
+  const fromEmail = m.fromEmail || m.user;
+  try {
+    const transport = nodemailer.createTransport({
+      host: m.host,
+      port: m.port,
+      secure: Number(m.port) === 465,
+      auth: { user: m.user, pass: m.pass },
+      connectionTimeout: 15000,
+      greetingTimeout: 15000,
+      socketTimeout: 30000,
+    });
+    await transport.sendMail({
+      from: m.fromName ? { name: m.fromName, address: fromEmail } : fromEmail,
+      to,
+      subject: `${who} made you a mixtape: ${tape.title}`,
+      text: mailText,
+      html: mailHtml,
+      attachments: [
+        { filename: 'cassette.png', content: png, cid: 'cassette', contentType: 'image/png', contentDisposition: 'inline' },
+        { filename: `${safeName(tape.title, 'mixtape')}.html`, content: html, contentType: 'text/html; charset=utf-8' },
+      ],
+    });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('mail failed:', e.message);
+    res.status(502).json({ error: `Could not send: ${e.message}` });
+  }
 });
 
 app.listen(PORT, '0.0.0.0', () => {

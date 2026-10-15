@@ -1,6 +1,6 @@
 {
   "name": "mixtape-maker",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Build side-timed cassette mixtapes with printable J-cards on your Umbrel.",
   "main": "server.js",
   "license": "MIT",
@@ -9,6 +9,8 @@
   },
   "dependencies": {
     "express": "^4.19.2",
-    "music-metadata": "^7.14.0"
+    "music-metadata": "^7.14.0",
+    "nodemailer": "^6.10.1",
+    "yazl": "^2.5.1"
   }
 }

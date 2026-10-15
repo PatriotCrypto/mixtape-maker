@@ -45,12 +45,20 @@
   }
 
   async function api(path, opts) {
+    const raw = opts && opts.raw;
     const res = await fetch(path, {
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': raw ? opts.type : 'application/json' },
       ...opts,
-      body: opts && opts.body ? JSON.stringify(opts.body) : undefined,
+      body: raw ? raw : opts && opts.body ? JSON.stringify(opts.body) : undefined,
     });
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    if (!res.ok) {
+      let msg = `${res.status} ${res.statusText}`;
+      try {
+        const j = await res.json();
+        if (j && j.error) msg = j.error;
+      } catch {}
+      throw new Error(msg);
+    }
     return res.status === 204 ? null : res.json();
   }
 
@@ -371,7 +379,39 @@
   const PHOTO_SRC = 'img/cassette-base.webp';
   const LABEL = '192,119 1335,119 1396,190 1396,688 1388,695 140,695 131,688 131,190';
 
-  function cassetteSVG(tape) {
+
+  // Animated reels for the share page: two white hubs that spin and a tape pack that moves from one
+  // reel to the other. Drawn over the photo's window; CSS in the share page runs the animation.
+  const HUB_L = [467.5, 450];
+  const HUB_R = [1062.5, 450];
+  function liveReels(id) {
+    const hub = (c, cls) => `<g class="reel ${cls}" style="transform-origin:${c[0]}px ${c[1]}px">
+      <circle cx="${c[0]}" cy="${c[1]}" r="89" fill="url(#${id}hw)" stroke="rgba(0,0,0,.4)" stroke-width="2"/>
+      <circle cx="${c[0]}" cy="${c[1]}" r="62" fill="#0c0a09" stroke="#000" stroke-width="3"/>
+      ${[0, 60, 120, 180, 240, 300]
+        .map((a) => `<rect x="${c[0] - 12}" y="${c[1] - 66}" width="24" height="24" rx="3" fill="#ecece6" stroke="rgba(0,0,0,.25)" stroke-width="1" transform="rotate(${a} ${c[0]} ${c[1]})"/>`)
+        .join('')}
+    </g>`;
+    const rings = (c, r) => [0.9, 0.8, 0.7, 0.6, 0.5].map((k) => `<circle cx="${c[0]}" cy="${c[1]}" r="${(r * k).toFixed(1)}" fill="none" stroke="rgba(255,255,255,.05)" stroke-width="2"/>`).join('');
+    return `<defs>
+      <radialGradient id="${id}hw" cx=".5" cy=".5" r=".5"><stop offset=".62" stop-color="#d9d9d2"/><stop offset=".9" stop-color="#f6f6f1"/><stop offset="1" stop-color="#c9c9c1"/></radialGradient>
+      <linearGradient id="${id}gb" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#6c6c6c"/><stop offset=".3" stop-color="#aaa"/><stop offset=".55" stop-color="#9a9a9a"/><stop offset="1" stop-color="#5f5f5f"/></linearGradient>
+      <radialGradient id="${id}pk" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#150d09"/><stop offset=".55" stop-color="#2a1a12"/><stop offset="1" stop-color="#3b271b"/></radialGradient>
+      <linearGradient id="${id}gl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".22"/><stop offset=".45" stop-color="#fff" stop-opacity="0"/></linearGradient>
+      <clipPath id="${id}win"><rect x="597" y="365" width="335" height="147" rx="8"/></clipPath>
+    </defs>
+    <g clip-path="url(#${id}win)">
+      <rect x="597" y="365" width="335" height="147" fill="url(#${id}gb)"/>
+      <g class="pack packL" style="transform-origin:${HUB_L[0]}px ${HUB_L[1]}px"><circle cx="${HUB_L[0]}" cy="${HUB_L[1]}" r="215" fill="url(#${id}pk)"/>${rings(HUB_L, 215)}</g>
+      <g class="pack packR" style="transform-origin:${HUB_R[0]}px ${HUB_R[1]}px"><circle cx="${HUB_R[0]}" cy="${HUB_R[1]}" r="315" fill="url(#${id}pk)"/>${rings(HUB_R, 315)}</g>
+      <line x1="597" y1="451" x2="932" y2="451" stroke="rgba(255,255,255,.22)" stroke-width="2.5"/>
+      <rect x="597" y="365" width="335" height="147" fill="url(#${id}gl)"/>
+      <rect x="597" y="365" width="335" height="147" rx="8" fill="none" stroke="rgba(0,0,0,.55)" stroke-width="5"/>
+    </g>
+    ${hub(HUB_L, 'reelL')}${hub(HUB_R, 'reelR')}`;
+  }
+
+  function cassetteSVG(tape, opts = {}) {
     if (!photoOk) return cassetteSVGVector(tape);
     const s = STYLES[tape.style] || STYLES.red;
     const id = `p${++svgSeq}`;
@@ -403,7 +443,10 @@
     </linearGradient>
   </defs>
 
+  <!-- dark backing so the see-through reel holes are not transparent in exports -->
+  <rect x="335" y="330" width="870" height="225" rx="112" fill="#0c0a09"/>
   <image href="${PHOTO_SRC}" x="0" y="0" width="1536" height="1024"/>
+  ${opts.live ? liveReels(id) : ''}
 
   <g clip-path="url(#${id}l)">
     <!-- coloured stripe printed on the paper -->
@@ -465,8 +508,7 @@
             'div',
             { class: 'btns' },
             h('button', { onclick: () => openTape(t) }, 'Edit'),
-            h('button', { onclick: () => printJCard(t) }, 'Print'),
-            h('button', { onclick: () => (location.href = `api/tapes/${t.id}/m3u`) }, 'M3U'),
+            h('button', { class: 'primary', onclick: () => openShare(t) }, 'Share'),
             h('button', { onclick: () => deleteTape(t) }, 'Delete')
           )
         )
@@ -474,41 +516,262 @@
     }
   }
 
-  // ---------- J-card ----------
-  function printJCard(tape) {
-    const root = $('jcard-root');
-    const sideList = (ids, label) => {
-      const secs = ids.reduce((s, id) => s + (state.byId.get(id)?.duration || 0), 0);
-      return [
-        h('h2', {}, h('span', { text: `SIDE ${label}` }), h('span', { text: fmt(secs) })),
-        h(
-          'ol',
-          {},
-          ids.map((id) => {
-            const t = state.byId.get(id);
-            return h('li', { text: t ? `${t.artist} – ${t.title}` : '(missing track)' });
-          })
-        ),
-      ];
+  // ---------- digital cassette image (PNG) ----------
+  let embedCache = null;
+  function blobToDataURL(blob) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = reject;
+      r.readAsDataURL(blob);
+    });
+  }
+  async function embeds() {
+    if (!embedCache) {
+      embedCache = (async () => {
+        const grab = async (url) => {
+          const r = await fetch(url);
+          if (!r.ok) throw new Error(`${url} ${r.status}`);
+          return blobToDataURL(await r.blob());
+        };
+        const [f5, f7] = await Promise.all([
+          grab('fonts/caveat-latin-500-normal.woff2').catch(() => null),
+          grab('fonts/caveat-latin-700-normal.woff2').catch(() => null),
+        ]);
+        const photo = photoOk ? await grab(PHOTO_SRC).catch(() => null) : null;
+        const face = (data, w) =>
+          data ? `@font-face{font-family:Caveat;font-weight:${w};src:url(${data}) format('woff2');}` : '';
+        return { photo, css: face(f5, 500) + face(f7, 700) };
+      })();
+    }
+    return embedCache;
+  }
+
+  // Render the cassette to a PNG blob. The SVG is made self-contained (photo and font inlined)
+  // because an SVG drawn into a canvas cannot load files from the page.
+  async function cassettePNG(tape, width = 1536) {
+    const e = await embeds();
+    let svg = cassetteSVG(tape);
+    if (e.photo) svg = svg.replace(`href="${PHOTO_SRC}"`, `href="${e.photo}"`);
+    svg = svg.replace('<defs>', `<defs><style>${e.css}</style>`);
+    svg = svg.replace('<svg ', `<svg width="1536" height="1024" `);
+    if (document.fonts && document.fonts.load) {
+      await Promise.all([document.fonts.load('700 40px Caveat'), document.fonts.load('500 40px Caveat')]).catch(() => {});
+    }
+    const img = new Image();
+    img.decoding = 'sync';
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = () => reject(new Error('could not draw the cassette'));
+      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+    });
+    const c = document.createElement('canvas');
+    c.width = width;
+    c.height = Math.round((width * 1024) / 1536);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    return new Promise((resolve, reject) => c.toBlob((b) => (b ? resolve(b) : reject(new Error('PNG failed'))), 'image/png'));
+  }
+
+  const fileSafe = (t) => ((t.title || 'mixtape').replace(/[^\w\- ]+/g, '').trim() || 'mixtape');
+  function saveBlob(blob, name) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  }
+
+  async function downloadImage(tape) {
+    try {
+      toast('Drawing your cassette…');
+      saveBlob(await cassettePNG(tape), `${fileSafe(tape)}.png`);
+      toast('Cassette image saved.');
+    } catch (e) {
+      toast(`Image failed: ${e.message}`);
+    }
+  }
+
+  // The full bundle: songs in tape order, playlist, track list and the cassette picture.
+  async function downloadTape(tape) {
+    if (!tape.id) return toast('Save the tape first, then download it.');
+    if (!tape.sideA.length && !tape.sideB.length) return toast('Add some songs first.');
+    try {
+      toast('Packing the tape…');
+      const png = await cassettePNG(tape);
+      await api(`api/tapes/${tape.id}/image`, { method: 'PUT', raw: png, type: 'image/png' });
+      location.href = `api/tapes/${tape.id}/zip`;
+    } catch (e) {
+      toast(`Download failed: ${e.message}`);
+    }
+  }
+
+  // ---------- sharing ----------
+  // The cassette goes out as one self-contained .html file: it shows a sleeve, and a click slides the
+  // cassette out and opens the track list. No server, no internet and no JavaScript libraries needed.
+  let templateCache = null;
+  async function selfContainedSVG(tape) {
+    const e = await embeds();
+    let svg = cassetteSVG(tape);
+    if (e.photo) svg = svg.replace(`href="${PHOTO_SRC}"`, `href="${e.photo}"`);
+    svg = svg.replace('<defs>', `<defs><style>${e.css}</style>`);
+    return svg.replace('<svg ', '<svg width="1536" height="1024" ');
+  }
+
+  async function buildShareHTML(tape) {
+    if (!templateCache) {
+      const r = await fetch('share-template.html');
+      if (!r.ok) throw new Error('share template missing');
+      templateCache = await r.text();
+    }
+    const e = await embeds();
+    let svg = cassetteSVG(tape, { live: true });
+    if (e.photo) svg = svg.replace(`href="${PHOTO_SRC}"`, `href="${e.photo}"`);
+    svg = svg.replace('<svg ', '<svg class="tape" ');
+    const st = STYLES[tape.style] || STYLES.red;
+    const rows = (ids) =>
+      ids
+        .map((id) => state.byId.get(id))
+        .filter(Boolean)
+        .map((t) => ({ t: t.title, a: t.artist, d: t.duration }));
+    const data = {
+      title: tape.title || 'Untitled Mix',
+      to: tape.to || '',
+      from: tape.from || '',
+      note: tape.note || '',
+      mins: tape.lengthMin || 45,
+      accent: st.accent,
+      accent2: st.accent2,
+      ink: st.ink,
+      sideA: rows(tape.sideA),
+      sideB: rows(tape.sideB),
     };
-    root.replaceChildren(
-      h(
-        'div',
-        { class: `jcard s-${tape.style}` },
-        h('div', { class: 'back' }, h('div', { class: 'bar' }), sideList(tape.sideA, 'A'), sideList(tape.sideB, 'B')),
-        h('div', { class: 'spine', text: tape.title || 'Untitled Mix' }),
-        h(
-          'div',
-          { class: 'front' },
-          h('div', { class: 'bar' }),
-          h('h1', { text: tape.title || 'Untitled Mix' }),
-          h('div', { class: 'tofrom' }, tape.to ? h('div', { text: `To: ${tape.to}` }) : null, tape.from ? h('div', { text: `From: ${tape.from}` }) : null),
-          tape.note ? h('div', { class: 'note', text: tape.note }) : null,
-          h('div', { class: 'cut', text: `C-${tape.lengthMin * 2} · cut on the dashed line, fold at the spine` })
-        )
-      )
+    const json = JSON.stringify(data).split('<').join('\\u003c').split(String.fromCharCode(8232)).join('').split(String.fromCharCode(8233)).join('');
+    return templateCache
+      .replace('/*FONTS*/', () => e.css)
+      .replace('<!--CASSETTE-->', () => svg)
+      .replace('__DATA__', () => json);
+  }
+
+  const blobToB64 = async (blob) => (await blobToDataURL(blob)).split(',')[1];
+
+  async function downloadHTML(tape) {
+    const html = await buildShareHTML(tape);
+    saveBlob(new Blob([html], { type: 'text/html' }), `${fileSafe(tape)}.html`);
+  }
+
+  async function previewHTML(tape) {
+    const html = await buildShareHTML(tape);
+    const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+    window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }
+
+  const dlg = () => $('share');
+  async function openShare(tape) {
+    if (!tape.sideA.length && !tape.sideB.length) return toast('Add some songs first.');
+    const box = $('share-body');
+    const status = h('div', { class: 'share-status', role: 'status' });
+    const say = (m, bad) => {
+      status.textContent = m;
+      status.classList.toggle('bad', !!bad);
+    };
+    const wrap = (fn) => async () => {
+      try {
+        say('Working…');
+        await fn();
+        if (status.textContent === 'Working…') say('');
+      } catch (e) {
+        say(e.message || String(e), true);
+      }
+    };
+
+    let mail = { ready: false };
+    try {
+      mail = await api('api/settings/mail');
+    } catch {}
+
+    const to = h('input', { type: 'text', placeholder: 'friend@example.com (separate several with commas)', inputmode: 'email', autocomplete: 'off' });
+    const msg = h('textarea', { rows: '3', maxlength: '1000', placeholder: 'Optional message' });
+    const sendBtn = h('button', { class: 'primary' }, 'Send cassette');
+    sendBtn.addEventListener(
+      'click',
+      wrap(async () => {
+        if (!mail.ready) throw new Error('Set up email below first.');
+        if (!tape.id) throw new Error('Save the tape first.');
+        say('Sending…');
+        const [html, png] = await Promise.all([buildShareHTML(tape), cassettePNG(tape, 1024)]);
+        await api(`api/tapes/${tape.id}/email`, {
+          method: 'POST',
+          body: { to: to.value, message: msg.value, html, png: await blobToB64(png) },
+        });
+        say(`Sent to ${to.value.trim()}.`);
+      })
     );
-    window.print();
+
+    // email setup
+    const f = (label, el, hint) => h('label', {}, h('span', { text: label }), el, hint ? h('small', { text: hint }) : null);
+    const host = h('input', { value: mail.host || '', placeholder: 'smtp.gmail.com' });
+    const port = h('input', { value: mail.port || 465, inputmode: 'numeric' });
+    const user = h('input', { value: mail.user || '', placeholder: 'you@gmail.com', autocomplete: 'off' });
+    const pass = h('input', { type: 'password', placeholder: mail.hasPass ? '(saved, leave blank to keep)' : 'App password', autocomplete: 'new-password' });
+    const fromName = h('input', { value: mail.fromName || '', placeholder: 'Your name' });
+    const saveMail = h('button', {}, 'Save email setup');
+    saveMail.addEventListener(
+      'click',
+      wrap(async () => {
+        const r = await api('api/settings/mail', {
+          method: 'PUT',
+          body: { host: host.value, port: port.value, user: user.value, pass: pass.value, fromName: fromName.value },
+        });
+        mail = await api('api/settings/mail');
+        pass.value = '';
+        setup.open = !r.ready;
+        say(r.ready ? 'Email setup saved.' : 'Saved, but host, username and password are all needed.');
+      })
+    );
+    const setup = h(
+      'details',
+      { class: 'mail-setup' },
+      h('summary', { text: mail.ready ? 'Email setup (done)' : 'Email setup (needed once)' }),
+      h('p', { class: 'muted', text: 'Use your email provider’s SMTP details. For Gmail: smtp.gmail.com, port 465, your address, and an App Password (Google Account > Security > App passwords). The password stays on your Umbrel.' }),
+      f('SMTP server', host),
+      f('Port', port, '465 or 587'),
+      f('Username', user),
+      f('Password', pass),
+      f('Sender name', fromName),
+      saveMail
+    );
+    if (!mail.ready) setup.open = true;
+
+    const btn = (label, fn, cls = '') => {
+      const b = h('button', { class: cls }, label);
+      b.addEventListener('click', wrap(fn));
+      return b;
+    };
+
+    box.replaceChildren(
+      h('h2', { text: `Share “${tape.title || 'Untitled Mix'}”` }),
+      h('section', {},
+        h('h3', { text: 'Email it from here' }),
+        h('p', { class: 'muted', text: 'They get the cassette picture and track list in the email, plus the file that opens the cassette.' }),
+        to, msg, h('div', { class: 'row' }, sendBtn), setup),
+      h('section', {},
+        h('h3', { text: 'Or send it yourself' }),
+        h('p', { class: 'muted', text: 'Download the cassette and send it by text, Messenger, AirDrop, whatever you like. The .html file opens in any browser, even offline.' }),
+        h('div', { class: 'row' },
+          btn('Download cassette (.html)', () => downloadHTML(tape), 'primary'),
+          btn('Preview', () => previewHTML(tape)),
+          btn('Picture (.png)', async () => { saveBlob(await cassettePNG(tape), `${fileSafe(tape)}.png`); }),
+          btn('With music (.zip)', async () => {
+            if (!tape.id) throw new Error('Save the tape first.');
+            await downloadTape(tape);
+          }))),
+      status,
+      h('div', { class: 'row end' }, h('button', { class: 'ghost', onclick: () => dlg().close() }, 'Close'))
+    );
+    dlg().showModal();
   }
 
   // ---------- actions ----------
@@ -557,12 +820,6 @@
     const p = $('player');
     p.src = `api/stream/${id}`;
     p.play().catch(() => {});
-  }
-
-  function exportM3U() {
-    readMeta();
-    if (!state.current.id) return toast('Save the tape first, then export.');
-    location.href = `api/tapes/${state.current.id}/m3u`;
   }
 
   function showView(name) {
@@ -618,12 +875,13 @@
     })
   );
   $('save').addEventListener('click', saveTape);
-  $('print').addEventListener('click', () => {
+  $('share-btn').addEventListener('click', async () => {
     readMeta();
+    if (!state.current.title) return toast('Give your tape a title first.');
     if (!state.current.sideA.length && !state.current.sideB.length) return toast('Add some songs first.');
-    printJCard(state.current);
+    await saveTape();
+    if (state.current.id) openShare(state.current);
   });
-  $('m3u').addEventListener('click', exportM3U);
   $('new').addEventListener('click', () => {
     state.current = blankTape();
     renderMeta();

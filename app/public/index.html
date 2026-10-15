@@ -67,9 +67,8 @@
       </div>
 
       <div class="actions">
-        <button id="save" class="primary">Save tape</button>
-        <button id="print" class="ghost">Print J-card</button>
-        <button id="m3u" class="ghost">Export M3U</button>
+        <button id="save">Save tape</button>
+        <button id="share-btn" class="primary">Share cassette</button>
         <button id="new" class="ghost">New tape</button>
         <span id="toast" class="toast" role="status"></span>
       </div>
@@ -82,7 +81,7 @@
     <div id="shelf" class="shelf"></div>
   </main>
 
-  <div id="jcard-root" aria-hidden="true"></div>
+  <dialog id="share"><div id="share-body"></div></dialog>
   <script src="app.js"></script>
 </body>
 </html>
