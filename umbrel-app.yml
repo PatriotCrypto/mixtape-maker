@@ -24,9 +24,9 @@ description: >-
 
   Music is read from the Umbrel storage music folder in read-only mode.
 developer: PatriotCrypto
-website: https://github.com/PatriotCrypto/umbrel-mixtape-maker
-repo: https://github.com/PatriotCrypto/umbrel-mixtape-maker
-support: https://github.com/PatriotCrypto/umbrel-mixtape-maker/issues
+website: https://github.com/PatriotCrypto/mixtape-maker
+repo: https://github.com/PatriotCrypto/mixtape-maker
+support: https://github.com/PatriotCrypto/mixtape-maker/issues
 port: 3917
 gallery: []
 path: ""
@@ -35,4 +35,4 @@ defaultPassword: ""
 releaseNotes: >-
   Initial release: library scan, Side A/B tape timers, tape shelf, printable J-cards and M3U export.
 submitter: PatriotCrypto
-submission: https://github.com/PatriotCrypto/umbrel-mixtape-maker
+submission: https://github.com/PatriotCrypto/mixtape-maker
